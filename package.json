@@ -1,0 +1,26 @@
+{
+  "name": "kelam-db",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "db:init": "node lib/init-db.cjs"
+  },
+  "dependencies": {
+    "next": "15.2.4",
+    "react": "^18",
+    "react-dom": "^18",
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@libsql/client": "^0.14.0",
+    "bcryptjs": "^2.4.3",
+    "jose": "^5.9.3",
+    "docx": "^8.5.0"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.0.1",
+    "postcss": "^8",
+    "tailwindcss": "^3.3.0"
+  }
+}
