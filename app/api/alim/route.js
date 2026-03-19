@@ -16,24 +16,38 @@ export async function GET(request) {
     const r = await db.execute({ sql, args })
     return NextResponse.json(r.rows)
   } catch(e) {
-    console.error('GET /api/alim:', e)
+    console.error('GET /api/alim hatasi:', e)
     return NextResponse.json({ hata: e.message }, { status: 500 })
   }
 }
+
+// Boş string → null dönüşümü
+function n(v) { return (v === '' || v === undefined) ? null : v }
+function ni(v) { const p = parseInt(v); return isNaN(p) ? null : p }
+function nf(v) { const p = parseFloat(v); return isNaN(p) ? null : p }
 
 export async function POST(request) {
   try {
     const db = getDb()
     const d = await request.json()
+    console.log('POST /api/alim:', JSON.stringify(d))
+
     const r = await db.execute({
-      sql: `INSERT INTO alimler (ad,ad_arapca,ad_latinize,lakap,vefat_hicri,vefat_miladi,
-        dogum_hicri,dogum_miladi,dogum_yeri,vefat_yeri,ekol_id,mezhep,biyografi,enlem,boylam)
+      sql: `INSERT INTO alimler
+        (ad, ad_arapca, ad_latinize, lakap,
+         vefat_hicri, vefat_miladi, dogum_hicri, dogum_miladi,
+         dogum_yeri, vefat_yeri, ekol_id, mezhep, biyografi, enlem, boylam)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      args:[d.ad,d.ad_arapca,d.ad_latinize,d.lakap,d.vefat_hicri,d.vefat_miladi,
-        d.dogum_hicri,d.dogum_miladi,d.dogum_yeri,d.vefat_yeri,d.ekol_id,d.mezhep,d.biyografi,d.enlem,d.boylam]
+      args: [
+        n(d.ad), n(d.ad_arapca), n(d.ad_latinize), n(d.lakap),
+        n(d.vefat_hicri), ni(d.vefat_miladi), n(d.dogum_hicri), ni(d.dogum_miladi),
+        n(d.dogum_yeri), n(d.vefat_yeri), ni(d.ekol_id), n(d.mezhep),
+        n(d.biyografi), nf(d.enlem), nf(d.boylam)
+      ]
     })
     return NextResponse.json({ id: Number(r.lastInsertRowid), basarili: true })
   } catch(e) {
+    console.error('POST /api/alim hatasi:', e)
     return NextResponse.json({ hata: e.message }, { status: 500 })
   }
 }
