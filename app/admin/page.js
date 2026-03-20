@@ -203,13 +203,22 @@ function AiIcerik({ setMesaj, setHata }) {
       else setHata(d.hata || 'Kayıt hatası')
     } else if (form.tur === 'gorus') {
       try {
-        const temizMetin = cikti.replace(/```json|```/g,'').trim()
+        let temizMetin = cikti
+        const jsonBlogu = cikti.match(/```(?:json)?\s*([\s\S]*?)```/)
+        if (jsonBlogu) {
+          temizMetin = jsonBlogu[1].trim()
+        } else {
+          const bas = cikti.indexOf('[')
+          const bit = cikti.lastIndexOf(']')
+          if (bas !== -1 && bit !== -1) temizMetin = cikti.slice(bas, bit + 1)
+        }
         const gorusler = JSON.parse(temizMetin)
+        if (!Array.isArray(gorusler)) throw new Error('Dizi bekleniyor')
         for (const g of gorusler) {
           await fetch(`/api/alim/${form.alim_id}/gorusler`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({...g, kaynak_id: form.kaynak_id||null}) })
         }
         setMesaj(`✓ ${gorusler.length} görüş kaydedildi`)
-      } catch { setHata('JSON formatı hatalı. Manuel kontrol edin.') }
+      } catch(je) { setHata('Görüşler kaydedilemedi: ' + je.message + '. Üretim türünü Biyografi olarak değiştirip tekrar deneyin.') }
     }
   }
 
