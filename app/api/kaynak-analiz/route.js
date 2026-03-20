@@ -9,10 +9,31 @@ function jsonCikar(metin) {
     () => JSON.parse(metin.trim()),
     () => { const m = metin.match(/```(?:json)?\s*([\s\S]+?)```/); if(m) return JSON.parse(m[1].trim()) },
     () => { const b = metin.indexOf('{'), e = metin.lastIndexOf('}'); if(b>=0&&e>b) return JSON.parse(metin.slice(b,e+1)) },
-    () => { const b = metin.indexOf('['), e = metin.lastIndexOf(']'); if(b>=0&&e>b) return JSON.parse(metin.slice(b,e+1)) },
   ]
   for (const y of yontemler) { try { const r = y(); if(r) return r } catch {} }
   return null
+}
+
+// Metinden alimin geçtiği bölümü bul
+function alimBolumuBul(metin, alimAdi) {
+  if (!metin) return ''
+  const adParcalari = alimAdi.split(/[\s,._-]+/).filter(p => p.length > 3)
+  let enIyiKonum = -1
+
+  for (const parca of adParcalari) {
+    const konum = metin.toLowerCase().indexOf(parca.toLowerCase())
+    if (konum !== -1) {
+      enIyiKonum = konum
+      break
+    }
+  }
+
+  if (enIyiKonum === -1) return metin.slice(0, 4000)
+
+  // Alimin geçtiği bölümün etrafını al (2000 karakter önce, 4000 sonra)
+  const bas = Math.max(0, enIyiKonum - 2000)
+  const bit = Math.min(metin.length, enIyiKonum + 4000)
+  return metin.slice(bas, bit)
 }
 
 export async function POST(request) {
@@ -31,18 +52,15 @@ export async function POST(request) {
       ? `${kaynak_bilgisi.yazar ? kaynak_bilgisi.yazar + ', ' : ''}${kaynak_bilgisi.baslik}${kaynak_bilgisi.yayin_yili ? ', ' + kaynak_bilgisi.yayin_yili : ''}`
       : dosyaAdi
 
-    const metinKirpilmis = metin?.slice(0, 20000) || ''
+    const tamMetin = metin || ''
 
-    // ADIM 1: Sadece alim isimlerini bul (kısa ve hızlı)
+    // ADIM 1: Alim isimlerini bul
     const isimYaniti = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 500,
+      max_tokens: 600,
       messages: [{
         role: 'user',
-        content: `Aşağıdaki metinde geçen İslam alimlerinin isimlerini listele. Sadece JSON array döndür, başka hiçbir şey yazma. Örnek: ["Teftazani","Curcani","Gazali"]
-
-Metin:
-${metinKirpilmis.slice(0, 8000)}`
+        content: `Bu metinde geçen İslam alimlerinin isimlerini JSON array olarak ver. Sadece ["isim1","isim2"] formatında yaz, başka hiçbir şey ekleme.\n\nMetin:\n${tamMetin.slice(0, 10000)}`
       }]
     })
 
@@ -52,91 +70,94 @@ ${metinKirpilmis.slice(0, 8000)}`
     try {
       const parsed = jsonCikar(isimMetni)
       if (Array.isArray(parsed)) alimIsimleri = parsed
-      else if (parsed?.alimler) alimIsimleri = parsed.alimler
     } catch {}
 
+    // Fallback: satır satır oku
     if (alimIsimleri.length === 0) {
-      // Manuel regex ile isim çıkarmayı dene
-      const satırlar = isimMetni.split('\n').filter(s => s.trim().length > 2)
-      alimIsimleri = satırlar.map(s => s.replace(/^[-•*\d.]+\s*/, '').trim()).filter(s => s.length > 2).slice(0, 20)
+      alimIsimleri = isimMetni
+        .split('\n')
+        .map(s => s.replace(/^[-•*"\d.[\]]+\s*/,'').replace(/[",\]]+$/,'').trim())
+        .filter(s => s.length > 3 && s.length < 60)
+        .slice(0, 15)
     }
 
     if (alimIsimleri.length === 0) {
       return NextResponse.json({
         basarili: false,
-        hata: 'Metinde alim ismi bulunamadı. Dosyanın kelam alimlerini içerdiğinden emin olun.',
-        hamMetin: isimMetni
+        hata: 'Metinde alim ismi bulunamadı. Dosyanın İslam alimleri hakkında bilgi içerdiğinden emin olun.',
       })
     }
 
-    // ADIM 2: Her alim için ayrı ayrı detay çıkar (max 10 alim)
-    const alimleriIsle = alimIsimleri.slice(0, 10)
+    // ADIM 2: Her alim için ilgili metin bölümünü analiz et
     const sonucAlimler = []
 
-    for (const alimAdi of alimleriIsle) {
+    for (const alimAdi of alimIsimleri.slice(0, 8)) {
       try {
+        // Bu alimin geçtiği metni bul
+        const alimMetni = alimBolumuBul(tamMetin, alimAdi)
+
         const detayYaniti = await client.messages.create({
           model: 'claude-haiku-4-5-20251001',
-          max_tokens: 800,
+          max_tokens: 1000,
           messages: [{
             role: 'user',
             content: `Kaynak: ${kaynakKunye}
-Alim: ${alimAdi}
+Alim adı: "${alimAdi}"
 
-Aşağıdaki metinden "${alimAdi}" hakkındaki bilgileri çıkar. SADECE JSON döndür:
-{"ad":"${alimAdi}","ad_arapca":"","vefat_hicri":"","vefat_miladi":0,"vefat_yeri":"","ekol_adi":"","biyografi":"","eserler":[{"ad":"","tur":"telif","aciklama":""}],"gorusler":[{"konu_basligi":"","konu_kategorisi":"Ilahiyat","icerik":"","kaynak_sayfa":"","isnad_notu":""}]}
+Aşağıdaki metin bölümünden bu alim hakkındaki bilgileri çıkar. Bilgi varsa doldur, yoksa boş string bırak.
+SADECE JSON yaz, açıklama ekleme:
 
-Bilgi yoksa ilgili alanı boş bırak. Metin:
-${metinKirpilmis.slice(0, 6000)}`
+{"ad":"${alimAdi}","ad_arapca":"","vefat_hicri":"","vefat_miladi":0,"vefat_yeri":"","dogum_yeri":"","ekol_adi":"","mezhep":"","biyografi":"","eserler":[{"ad":"","ad_arapca":"","tur":"telif","aciklama":""}],"gorusler":[{"konu_basligi":"","konu_kategorisi":"Ilahiyat","icerik":"","kaynak_sayfa":"","isnad_notu":"${kaynakKunye}, s.??."}]}
+
+Metin bölümü:
+${alimMetni}`
           }]
         })
 
         const detayMetni = detayYaniti.content[0]?.text?.trim() || ''
         const detay = jsonCikar(detayMetni)
 
-        if (detay && detay.ad) {
-          // Boş dizileri temizle
-          detay.eserler = (detay.eserler || []).filter(e => e.ad && e.ad.trim())
-          detay.gorusler = (detay.gorusler || []).filter(g => g.icerik && g.icerik.trim())
+        if (detay) {
+          // Boş kayıtları temizle
+          detay.eserler = (detay.eserler||[]).filter(e => e.ad?.trim())
+          detay.gorusler = (detay.gorusler||[]).filter(g => g.icerik?.trim())
 
-          // ISNAD notu ekle
+          // ISNAD notu güncelle
           detay.gorusler.forEach(g => {
-            if (!g.isnad_notu && g.kaynak_sayfa) {
-              g.isnad_notu = `${kaynakKunye}, ${g.kaynak_sayfa}.`
+            if (!g.isnad_notu?.includes(kaynakKunye)) {
+              g.isnad_notu = `${kaynakKunye}${g.kaynak_sayfa ? ', ' + g.kaynak_sayfa : ''}.`
             }
           })
 
-          // Veritabanı eşleştirme
+          // Veritabanı eşleştir
           const eslesme = mevcutAlimler.find(a =>
             a.ad?.toLowerCase().includes(alimAdi.toLowerCase()) ||
-            alimAdi.toLowerCase().includes(a.ad?.toLowerCase() || '') ||
-            a.ad_arapca === detay.ad_arapca
+            alimAdi.toLowerCase().includes((a.ad||'').toLowerCase())
           )
-          if (eslesme) detay.veritabani_id = eslesme.id
-          else detay.veritabani_id = null
+          detay.veritabani_id = eslesme ? eslesme.id : null
 
           sonucAlimler.push(detay)
         }
       } catch(e) {
-        console.error(`${alimAdi} işlenirken hata:`, e.message)
+        console.error(`${alimAdi} hatası:`, e.message)
       }
     }
 
     if (sonucAlimler.length === 0) {
       return NextResponse.json({
         basarili: false,
-        hata: 'Alimler tespit edildi ama detay çıkarılamadı. Farklı bir metin bölümü deneyin.',
+        hata: 'Alimler bulundu ama metin bölümlerinden detay çıkarılamadı. Daha az alim içeren kısa bir metin deneyin.',
       })
     }
 
-    const toplamGorus = sonucAlimler.reduce((t, a) => t + (a.gorusler?.length || 0), 0)
-    const toplamEser = sonucAlimler.reduce((t, a) => t + (a.eserler?.length || 0), 0)
+    const toplamGorus = sonucAlimler.reduce((t, a) => t + (a.gorusler?.length||0), 0)
+    const toplamEser  = sonucAlimler.reduce((t, a) => t + (a.eserler?.length||0), 0)
 
     return NextResponse.json({
       basarili: true,
       veri: {
         alimler: sonucAlimler,
-        ozet: `${sonucAlimler.length} alim, ${toplamGorus} görüş, ${toplamEser} eser tespit edildi. Kaynak: ${kaynakKunye}`
+        ozet: `${sonucAlimler.length} alim · ${toplamGorus} görüş · ${toplamEser} eser tespit edildi`
       }
     })
 
