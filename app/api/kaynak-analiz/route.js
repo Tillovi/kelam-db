@@ -87,8 +87,8 @@ SADECE JSON döndür, başka hiçbir şey yazma:
     if (base64) {
       // PDF: doğrudan Claude'a gönder
       yanit = await client.messages.create({
-        model: 'claude-opus-4-6',
-        max_tokens: 4000,
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 2000,
         system: sistemPrompt,
         messages: [{
           role: 'user',
@@ -111,8 +111,8 @@ SADECE JSON döndür, başka hiçbir şey yazma:
     } else {
       // Metin tabanlı
       yanit = await client.messages.create({
-        model: 'claude-opus-4-6',
-        max_tokens: 4000,
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 2000,
         system: sistemPrompt,
         messages: [{
           role: 'user',

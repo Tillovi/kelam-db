@@ -71,7 +71,7 @@ export async function POST(request) {
     }
 
     // Çok uzunsa kırp (Claude ~100k token sınırı var)
-    const maxKarakter = 80000
+    const maxKarakter = 20000
     const kirpildi = metin.length > maxKarakter
     if (kirpildi) metin = metin.slice(0, maxKarakter)
 
