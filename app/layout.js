@@ -15,6 +15,7 @@ export default function RootLayout({ children }) {
               <a href="/harita"     className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 rounded-md hover:bg-gray-100">Harita</a>
               <a href="/zaman"      className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 rounded-md hover:bg-gray-100">Zaman</a>
               <a href="/ag"         className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 rounded-md hover:bg-gray-100">İlişki ağı</a>
+              <a href="/kaynak-yukle" className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 rounded-md hover:bg-gray-100">Kaynak yükle</a>
               <a href="/admin"      className="ml-2 px-3 py-1.5 text-sm bg-gray-900 text-white rounded-md hover:bg-gray-700">Admin</a>
             </nav>
           </div>
