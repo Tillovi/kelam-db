@@ -1,11 +1,8 @@
-// app/api/kaynak-analiz/route.js
-// Claude dosyayı okur, kelam verisini ISNAD 2 atıflarıyla çıkarır
-
 import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { getDb } from '@/lib/db'
 
-export const maxDuration = 120 // 2 dakika
+export const maxDuration = 120
 
 export async function POST(request) {
   try {
@@ -17,143 +14,74 @@ export async function POST(request) {
 
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
-    // Mevcut alimleri al — eşleştirme için
     const db = getDb()
-    const { rows: mevcutAlimler } = await db.execute(
-      'SELECT id, ad, ad_arapca, ad_latinize FROM alimler'
-    )
-    const alimListesi = mevcutAlimler
-      .map(a => `ID:${a.id} | ${a.ad}${a.ad_arapca ? ' / ' + a.ad_arapca : ''}`)
-      .join('\n')
+    const { rows: mevcutAlimler } = await db.execute('SELECT id, ad, ad_arapca FROM alimler')
+    const alimListesi = mevcutAlimler.map(a => `ID:${a.id}=${a.ad}`).join(', ')
 
-    // ISNAD 2 kaynak bilgisi
-    const isnadBilgisi = kaynak_bilgisi
-      ? `Kaynak: ${kaynak_bilgisi.yazar ? kaynak_bilgisi.yazar + '. ' : ''}${kaynak_bilgisi.baslik}${kaynak_bilgisi.yayin_yili ? ', ' + kaynak_bilgisi.yayin_yili : ''}${kaynak_bilgisi.yayin_yeri ? ', ' + kaynak_bilgisi.yayin_yeri : ''}.`
-      : `Kaynak: ${dosyaAdi}`
+    const kaynakKunye = kaynak_bilgisi
+      ? `${kaynak_bilgisi.yazar ? kaynak_bilgisi.yazar + ', ' : ''}${kaynak_bilgisi.baslik}${kaynak_bilgisi.yayin_yili ? ', ' + kaynak_bilgisi.yayin_yili : ''}${kaynak_bilgisi.yayin_yeri ? ', ' + kaynak_bilgisi.yayin_yeri : ''}`
+      : dosyaAdi
 
-    const sistemPrompt = `Sen İslam kelam tarihi uzmanısın. Sana verilen akademik metni analiz edip yapılandırılmış veri çıkaracaksın.
+    const sistemPrompt = `Sen İslam kelam tarihi uzmanısın. Verilen metinden alim bilgilerini çıkarıp SADECE JSON formatında döndüreceksin.
 
-Görevin:
-1. Metinde geçen kelam alimlerini tespit et
-2. Her alim için biyografi bilgisi, görüşleri ve eser bilgilerini çıkar
-3. Mevcut veritabanıyla eşleştir — alim zaten varsa ID'sini kullan, yoksa yeni ekle
-4. Her bilgi için ISNAD 2 formatında sayfa numarası ver
+KURAL: Yanıtın { ile başlamalı ve } ile bitmeli. Başka hiçbir şey yazma.
 
-ISNAD 2 FORMAT: ${isnadBilgisi}
-Dipnot örneği: "${kaynak_bilgisi?.yazar?.split(' ').pop() || 'Kaynak'}, ${kaynak_bilgisi?.baslik || dosyaAdi}${kaynak_bilgisi?.yayin_yili ? ', ' + kaynak_bilgisi.yayin_yili : ''}, s. [sayfa]."
+Mevcut alimler (eşleştirme için): ${alimListesi || 'boş'}
+Kaynak künye: ${kaynakKunye}
 
-Mevcut veritabanındaki alimler:
-${alimListesi || '(Veritabanı boş)'}
+JSON şablonu:
+{"alimler":[{"veritabani_id":null,"ad":"Türkçe ad","ad_arapca":"عربي","vefat_hicri":"300","vefat_miladi":912,"vefat_yeri":"şehir","ekol_adi":"Maturidiyye","biyografi":"kısa biyografi","biyografi_sayfa":"s.45","eserler":[{"ad":"eser adı","ad_arapca":"عربي","tur":"telif","aciklama":"açıklama"}],"gorusler":[{"konu_basligi":"konu","konu_kategorisi":"Ilahiyat","icerik":"görüş metni","kaynak_sayfa":"s.89","isnad_notu":"${kaynakKunye}, s.89."}]}],"ozet":"kısa özet"}`
 
-SADECE JSON döndür, başka hiçbir şey yazma:
-{
-  "alimler": [
-    {
-      "veritabani_id": null,
-      "ad": "alimin Türkçe adı",
-      "ad_arapca": "العربي",
-      "vefat_hicri": "300",
-      "vefat_miladi": 912,
-      "vefat_yeri": "Bağdat",
-      "mezhep": "Hanefi",
-      "ekol_adi": "Maturidiyye",
-      "biyografi": "kısa biyografi metni",
-      "biyografi_sayfa": "s. 45",
-      "eserler": [
-        {
-          "ad": "eser adı",
-          "ad_arapca": "العربي",
-          "tur": "telif",
-          "aciklama": "kısa açıklama",
-          "sayfa": "s. 67"
-        }
-      ],
-      "gorusler": [
-        {
-          "konu_basligi": "Teklif-i ma la yuttak",
-          "konu_kategorisi": "Ilahiyat",
-          "icerik": "görüş metni",
-          "kaynak_sayfa": "s. 89",
-          "isnad_notu": "tam ISNAD 2 dipnotu"
-        }
-      ]
-    }
-  ],
-  "ozet": "Metinden ne çıkarıldığının kısa özeti"
-}`
+    const icerik = base64
+      ? [{ type:'document', source:{ type:'base64', media_type:'application/pdf', data:base64 } }, { type:'text', text:'Bu belgeyi analiz et ve JSON döndür.' }]
+      : `Aşağıdaki metni analiz et:\n\n${metin?.slice(0, 15000) || ''}`
 
-    let yanit
+    const yanit = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 2000,
+      system: sistemPrompt,
+      messages: [{ role: 'user', content: icerik }]
+    })
 
-    if (base64) {
-      // PDF: doğrudan Claude'a gönder
-      yanit = await client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 2000,
-        system: sistemPrompt,
-        messages: [{
-          role: 'user',
-          content: [
-            {
-              type: 'document',
-              source: {
-                type: 'base64',
-                media_type: 'application/pdf',
-                data: base64,
-              }
-            },
-            {
-              type: 'text',
-              text: 'Bu PDF dosyasını analiz et ve sistem talimatına göre JSON çıkar.'
-            }
-          ]
-        }]
-      })
-    } else {
-      // Metin tabanlı
-      yanit = await client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 2000,
-        system: sistemPrompt,
-        messages: [{
-          role: 'user',
-          content: `Aşağıdaki metni analiz et:\n\n${metin}`
-        }]
-      })
+    const hamMetin = yanit.content[0]?.text?.trim() || ''
+    console.log('Claude yanıtı (ilk 200):', hamMetin.slice(0, 200))
+
+    // JSON çıkarma — birden fazla yöntem dene
+    let veri = null
+    const yontemler = [
+      // 1. Doğrudan parse
+      () => JSON.parse(hamMetin),
+      // 2. Kod bloğu içinden
+      () => { const m = hamMetin.match(/```(?:json)?\s*([\s\S]+?)```/); if(m) return JSON.parse(m[1].trim()) },
+      // 3. İlk { ... } bloğu
+      () => { const bas = hamMetin.indexOf('{'); const bit = hamMetin.lastIndexOf('}'); if(bas>=0&&bit>bas) return JSON.parse(hamMetin.slice(bas,bit+1)) },
+      // 4. Boş şablon döndür
+      () => ({ alimler: [], ozet: 'Metinden alim bilgisi çıkarılamadı.' })
+    ]
+
+    for (const yontem of yontemler) {
+      try { veri = yontem(); if(veri) break } catch {}
     }
 
-    const hamMetin = yanit.content[0]?.text || ''
-
-    // JSON çıkar
-    let veri
-    try {
-      const jsonBlogu = hamMetin.match(/```(?:json)?\s*([\s\S]*?)```/)
-      const jsonMetin = jsonBlogu ? jsonBlogu[1].trim() : hamMetin.trim()
-      veri = JSON.parse(jsonMetin)
-    } catch(e) {
-      // JSON bulunamazsa ham metni döndür
-      return NextResponse.json({
-        basarili: false,
-        hata: 'JSON ayrıştırılamadı',
-        hamMetin,
-      })
+    if (!veri) {
+      return NextResponse.json({ basarili: false, hata: 'JSON üretilemedi', hamMetin })
     }
 
-    // Veritabanı eşleştirmesi — alim adını karşılaştır
+    // Veritabanı eşleştirme
     for (const alim of (veri.alimler || [])) {
       if (!alim.veritabani_id) {
         const eslesme = mevcutAlimler.find(a =>
           a.ad?.toLowerCase() === alim.ad?.toLowerCase() ||
-          a.ad_arapca === alim.ad_arapca ||
-          a.ad_latinize?.toLowerCase().includes(alim.ad?.toLowerCase())
+          a.ad_arapca === alim.ad_arapca
         )
         if (eslesme) alim.veritabani_id = eslesme.id
       }
     }
 
-    return NextResponse.json({ basarili: true, veri, isnadBilgisi })
+    return NextResponse.json({ basarili: true, veri })
 
   } catch(e) {
-    console.error('kaynak-analiz hatası:', e)
+    console.error('kaynak-analiz:', e)
     return NextResponse.json({ hata: e.message }, { status: 500 })
   }
 }
